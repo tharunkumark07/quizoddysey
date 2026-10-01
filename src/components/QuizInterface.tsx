@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PublicQuestion, QuizSessionState } from '../types/quiz';
-import { ChevronLeft, ChevronRight, Bookmark, Send, ShieldAlert, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ChevronRight, Send, ShieldAlert, Clock, CheckCircle2, AlertTriangle, Lock, ShieldCheck } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { AnimatedCircularTimer } from './AnimatedCircularTimer';
 import { AiSecurityWarningModal } from './AiSecurityWarningModal';
@@ -10,7 +10,7 @@ interface QuizInterfaceProps {
   session: QuizSessionState;
   questions: PublicQuestion[];
   onSelectOption: (questionId: number, optionIndex: number) => void;
-  onToggleMarkForReview: (questionId: number) => void;
+  onAdvanceQuestion?: (nextIndex: number) => void;
   onSubmitQuiz: () => void;
   onDisqualify: (reason: string) => void;
   isSubmitting: boolean;
@@ -22,12 +22,12 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
   session,
   questions,
   onSelectOption,
-  onToggleMarkForReview,
+  onAdvanceQuestion,
   onSubmitQuiz,
   onDisqualify,
   isSubmitting,
 }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(session.currentIndex || 0);
   const [questionSecondsLeft, setQuestionSecondsLeft] = useState(QUESTION_LIMIT_SECONDS);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
@@ -40,20 +40,21 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
   const currentQuestion = questions[currentIndex] || questions[0];
 
   const answeredCount = Object.keys(session.answers).length;
-  const unansweredCount = totalQuestions - answeredCount;
 
   const questionTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-advance or Auto-submit handler when 10 seconds expire
-  const handleQuestionTimeout = useCallback(() => {
+  // Strict forward-only advance handler (One-Way Progression)
+  const handleAdvance = useCallback(() => {
     if (currentIndex < totalQuestions - 1) {
-      setCurrentIndex((prev) => prev + 1);
+      const nextIdx = currentIndex + 1;
+      setCurrentIndex(nextIdx);
       setQuestionSecondsLeft(QUESTION_LIMIT_SECONDS);
+      onAdvanceQuestion?.(nextIdx);
     } else {
-      // Last question reached 0 -> trigger automatic answer submission
+      // Last question reached 0 -> trigger automatic final answer submission
       onSubmitQuiz();
     }
-  }, [currentIndex, totalQuestions, onSubmitQuiz]);
+  }, [currentIndex, totalQuestions, onSubmitQuiz, onAdvanceQuestion]);
 
   // Overall session timeout check -> trigger automatic answer submission
   useEffect(() => {
@@ -61,12 +62,6 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
       onSubmitQuiz();
     }
   }, [session.remainingSeconds, session.submitted, isSubmitting, onSubmitQuiz]);
-
-  // Reset 10s timer when switching questions manually
-  const navigateToQuestion = (index: number) => {
-    setCurrentIndex(index);
-    setQuestionSecondsLeft(QUESTION_LIMIT_SECONDS);
-  };
 
   // 10-second Countdown Effect for Current Question (Fluid 100ms ticks for smooth bar animation)
   useEffect(() => {
@@ -79,7 +74,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
     questionTimerRef.current = setInterval(() => {
       setQuestionSecondsLeft((prev) => {
         if (prev <= 0.1) {
-          handleQuestionTimeout();
+          handleAdvance();
           return QUESTION_LIMIT_SECONDS;
         }
         return Math.max(0, +(prev - 0.1).toFixed(1));
@@ -89,7 +84,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
     return () => {
       if (questionTimerRef.current) clearInterval(questionTimerRef.current);
     };
-  }, [currentIndex, showConfirmModal, showAiWarningModal, isSubmitting, handleQuestionTimeout]);
+  }, [currentIndex, showConfirmModal, showAiWarningModal, isSubmitting, handleAdvance]);
 
   // Anti-Cheat & AI Detection Handler
   const triggerAntiCheatViolation = useCallback((reason: string) => {
@@ -156,16 +151,14 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
         return;
       }
 
-      // Normal navigation shortcuts
+      // Keyboard shortcuts for options (1-4) or forward advance (Enter/Space)
       if (showConfirmModal || showAiWarningModal || isSubmitting) return;
 
-      if (e.key === 'ArrowRight' && currentIndex < totalQuestions - 1) {
-        navigateToQuestion(currentIndex + 1);
-      } else if (e.key === 'ArrowLeft' && currentIndex > 0) {
-        navigateToQuestion(currentIndex - 1);
-      } else if (['1', '2', '3', '4'].includes(e.key) && currentQuestion) {
+      if (['1', '2', '3', '4'].includes(e.key) && currentQuestion) {
         const optionIdx = parseInt(e.key, 10) - 1;
         onSelectOption(currentQuestion.id, optionIdx);
+      } else if (e.key === 'Enter') {
+        handleAdvance();
       }
     };
 
@@ -192,6 +185,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
     isSubmitting,
     currentQuestion,
     onSelectOption,
+    handleAdvance,
     triggerAntiCheatViolation,
   ]);
 
@@ -204,17 +198,16 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
   }
 
   const selectedOptionIndex = session.answers[currentQuestion.id];
-  const isMarked = !!session.markedForReview[currentQuestion.id];
   const optionPrefixes = ['A', 'B', 'C', 'D'];
 
   const timerProgress = (questionSecondsLeft / QUESTION_LIMIT_SECONDS) * 100;
   const isUrgent = questionSecondsLeft <= 3.0;
   const timerUrgencyState: 'calm' | 'caution' | 'critical' =
     questionSecondsLeft <= 3.0 ? 'critical' : questionSecondsLeft <= 6.0 ? 'caution' : 'calm';
-  const totalCompletionPercent = (answeredCount / totalQuestions) * 100;
+  const totalCompletionPercent = ((currentIndex + 1) / totalQuestions) * 100;
 
   return (
-    <div className="min-h-[calc(100vh-4.5rem)] bg-slate-950 py-10 px-4 sm:px-6 lg:px-8 font-sans select-none">
+    <div className="min-h-[calc(100vh-4.5rem)] bg-slate-950 py-8 px-4 sm:px-6 lg:px-8 font-sans select-none">
       <div className="max-w-[1240px] mx-auto space-y-6">
         
         {/* TOP LEVEL: EVENT, OVERALL PROGRESS & 10-SECOND TIMER HEADER */}
@@ -238,7 +231,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
               QUESTION {String(currentIndex + 1).padStart(2, '0')} / {String(totalQuestions).padStart(2, '0')}
             </div>
             <div className="hidden md:flex items-center space-x-1.5 text-xs font-mono text-slate-400">
-              <span>{answeredCount} of {totalQuestions} answered</span>
+              <span>{answeredCount} answered · Strict Sequential Protocol</span>
             </div>
           </div>
 
@@ -296,7 +289,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
               <div>
                 <div className="flex items-center space-x-2.5">
                   <span className="font-mono text-xs font-extrabold text-white uppercase tracking-wider">
-                    QUESTION {currentIndex + 1} COUNTDOWN
+                    QUESTION {currentIndex + 1} OF {totalQuestions}
                   </span>
                   <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border ${
                     timerUrgencyState === 'critical'
@@ -314,8 +307,8 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
                 </div>
                 <p className="text-[11px] text-slate-400 font-mono mt-0.5">
                   {currentIndex < totalQuestions - 1
-                    ? '10-second per question limit • Auto-advances when countdown expires'
-                    : 'Final challenge • Auto-submits exam when countdown expires'}
+                    ? '10-second rapid timer • One-way progression • Auto-advances at 0.0s'
+                    : 'Final challenge • Auto-submits examination when timer expires'}
                 </p>
               </div>
             </div>
@@ -352,7 +345,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
 
           {/* Tick Marks for Precision Feedback */}
           <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 px-1 pt-1">
-            <span>0.0s (Auto-submit)</span>
+            <span>0.0s (Auto-advance)</span>
             <span>2.5s</span>
             <span>5.0s (Halfway)</span>
             <span>7.5s</span>
@@ -360,7 +353,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
           </div>
         </div>
 
-        {/* MIDDLE LEVEL: MAIN QUESTION & NAVIGATOR PANEL */}
+        {/* MIDDLE LEVEL: MAIN QUESTION & TIMELINE PANEL */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
           {/* Main Question Content Area (lg:col-span-8) */}
@@ -380,7 +373,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
               />
             </div>
 
-            {/* Category & Mark for Review Header */}
+            {/* Category Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 pt-1">
               <div className="flex items-center space-x-3">
                 <span className="font-mono text-xs uppercase font-medium text-slate-400 tracking-wider">
@@ -393,17 +386,10 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
                 )}
               </div>
 
-              <button
-                onClick={() => onToggleMarkForReview(currentQuestion.id)}
-                className={`flex items-center space-x-1.5 font-mono text-xs px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  isMarked
-                    ? 'bg-amber-950 text-amber-300 border border-amber-800 font-semibold'
-                    : 'bg-slate-950 hover:bg-slate-800 text-slate-400 border border-slate-800'
-                }`}
-              >
-                <Bookmark className={`w-3.5 h-3.5 ${isMarked ? 'fill-amber-400 text-amber-400' : 'text-slate-500'}`} />
-                <span>{isMarked ? 'MARKED' : 'MARK'}</span>
-              </button>
+              <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
+                <Lock className="w-3.5 h-3.5 text-slate-500" />
+                <span className="hidden sm:inline">One-Way Progression</span>
+              </div>
             </div>
 
             {/* Question Text */}
@@ -420,7 +406,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
                   {currentQuestion.question}
                 </h2>
 
-                {/* Answer Options with Subtle Stagger */}
+                {/* Answer Options */}
                 <div className="space-y-3.5 pt-2">
                   {currentQuestion.options.map((optText, optIdx) => {
                     const isSelected = selectedOptionIndex === optIdx;
@@ -448,7 +434,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
                           {optionPrefixes[optIdx]}
                         </div>
 
-                        {/* Option Text Starting at Exact Same Horizontal Position */}
+                        {/* Option Text */}
                         <div className="text-sm sm:text-base font-sans leading-normal flex-1">
                           {cleanText}
                         </div>
@@ -463,37 +449,29 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
               </motion.div>
             </AnimatePresence>
 
-            {/* BOTTOM LEVEL: QUESTION NAVIGATION ACTIONS */}
-            <div className="flex items-center justify-between border-t border-slate-800 pt-6 font-sans">
-              <button
-                onClick={() => navigateToQuestion(Math.max(0, currentIndex - 1))}
-                disabled={currentIndex === 0}
-                className="h-12 px-6 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs sm:text-sm border border-slate-700 disabled:opacity-30 transition-all flex items-center space-x-2 cursor-pointer active:scale-[0.98]"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                <span>Previous</span>
-              </button>
-
-              <div className="font-mono text-xs text-slate-400 flex items-center space-x-2">
-                <span>10s Auto-advance</span>
+            {/* BOTTOM LEVEL: FORWARD-ONLY PROGRESSION ACTION */}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 pt-6 font-sans">
+              <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+                <span>10s auto-advancing</span>
                 <span className="text-slate-600">•</span>
                 <span className={`font-bold ${isUrgent ? 'text-rose-400 animate-pulse' : 'text-blue-400'}`}>
-                  {questionSecondsLeft}s
+                  {questionSecondsLeft.toFixed(1)}s
                 </span>
               </div>
 
               {currentIndex < totalQuestions - 1 ? (
                 <button
-                  onClick={() => navigateToQuestion(currentIndex + 1)}
-                  className="group h-12 px-6 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs sm:text-sm transition-all flex items-center space-x-2 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
+                  onClick={handleAdvance}
+                  className="group h-12 px-7 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs sm:text-sm transition-all flex items-center space-x-2 shadow-lg shadow-blue-600/20 hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
                 >
-                  <span>Next Challenge</span>
+                  <span>Submit &amp; Next Challenge</span>
                   <ChevronRight className="w-4 h-4 transition-transform duration-150 group-hover:translate-x-1" />
                 </button>
               ) : (
                 <button
                   onClick={() => setShowConfirmModal(true)}
-                  className="h-12 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm transition-all flex items-center space-x-2 shadow-lg shadow-emerald-600/20 hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
+                  className="h-12 px-7 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm transition-all flex items-center space-x-2 shadow-lg shadow-emerald-600/20 hover:-translate-y-0.5 active:scale-[0.98] cursor-pointer"
                 >
                   <span>Finish &amp; Submit</span>
                   <Send className="w-4 h-4" />
@@ -503,58 +481,82 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
 
           </div>
 
-          {/* Right Column: Question Navigator & Session Info (lg:col-span-4) */}
+          {/* Right Column: Read-Only Sequential Progress Timeline (lg:col-span-4) */}
           <div className="lg:col-span-4 space-y-6">
             
             <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-lg">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3 font-mono text-xs">
-                <span className="font-bold text-white uppercase tracking-wider">QUESTION NAVIGATOR</span>
-                <span className="text-slate-400">{answeredCount} / {totalQuestions} Answered</span>
+                <span className="font-bold text-white uppercase tracking-wider">PROGRESS TIMELINE</span>
+                <span className="text-slate-400">Question {currentIndex + 1} of {totalQuestions}</span>
               </div>
 
-              {/* Numbered Grid Cells */}
-              <div className="grid grid-cols-5 gap-2.5 font-mono text-xs">
+              {/* Sequential Non-Clickable Timeline Grid */}
+              <div className="grid grid-cols-5 gap-2.5 font-mono text-xs select-none">
                 {questions.map((q, idx) => {
                   const isCurrent = idx === currentIndex;
-                  const isAns = session.answers[q.id] !== undefined;
-                  const isMrk = !!session.markedForReview[q.id];
-
-                  let btnClasses = 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700';
+                  const isCompleted = idx < currentIndex;
+                  const isUpcoming = idx > currentIndex;
 
                   if (isCurrent) {
-                    btnClasses = 'bg-blue-600 border-blue-400 text-white font-bold ring-2 ring-blue-500/40';
-                  } else if (isAns) {
-                    btnClasses = 'bg-slate-800 text-slate-100 border-slate-700 font-medium';
-                  } else if (isMrk) {
-                    btnClasses = 'bg-amber-950 text-amber-300 border-amber-800 font-medium';
+                    return (
+                      <div
+                        key={q.id}
+                        className="relative h-11 rounded-xl border flex flex-col items-center justify-center bg-blue-600 border-blue-400 text-white font-bold ring-2 ring-blue-500/50 shadow-lg shadow-blue-600/30"
+                      >
+                        <span className="text-xs">{String(idx + 1).padStart(2, '0')}</span>
+                        <span className="text-[8px] uppercase tracking-tighter opacity-90">ACTIVE</span>
+                      </div>
+                    );
+                  }
+
+                  if (isCompleted) {
+                    return (
+                      <div
+                        key={q.id}
+                        className="relative h-11 rounded-xl border flex flex-col items-center justify-center bg-emerald-950/50 border-emerald-800/80 text-emerald-400 font-medium opacity-90"
+                      >
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span className="text-xs">{String(idx + 1).padStart(2, '0')}</span>
+                        </div>
+                        <span className="text-[8px] uppercase tracking-tighter text-emerald-500">LOCKED</span>
+                      </div>
+                    );
                   }
 
                   return (
-                    <button
+                    <div
                       key={q.id}
-                      onClick={() => navigateToQuestion(idx)}
-                      className={`relative h-11 rounded-xl border flex items-center justify-center transition-all cursor-pointer hover:-translate-y-0.5 active:scale-[0.96] ${btnClasses}`}
+                      className="relative h-11 rounded-xl border flex flex-col items-center justify-center bg-slate-950/60 border-slate-800/80 text-slate-600 opacity-60"
                     >
-                      <span>{String(idx + 1).padStart(2, '0')}</span>
-                    </button>
+                      <div className="flex items-center space-x-1">
+                        <Lock className="w-2.5 h-2.5 text-slate-600" />
+                        <span className="text-xs">{String(idx + 1).padStart(2, '0')}</span>
+                      </div>
+                      <span className="text-[8px] uppercase tracking-tighter text-slate-600">WAITING</span>
+                    </div>
                   );
                 })}
               </div>
 
-              {/* Navigator States Legend */}
+              {/* Progress States Info */}
               <div className="border-t border-slate-800 pt-3 space-y-2 text-[11px] font-mono text-slate-400">
                 <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded bg-blue-600"></span>
-                  <span>Active (10s Timer)</span>
+                  <span className="w-2.5 h-2.5 rounded bg-blue-600 ring-1 ring-blue-400"></span>
+                  <span className="text-slate-200">Current Question (10s Countdown)</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded bg-slate-800"></span>
-                  <span>Answered</span>
+                  <span className="w-2.5 h-2.5 rounded bg-emerald-950 border border-emerald-800"></span>
+                  <span>Passed / Completed (Locked)</span>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded bg-amber-950 border border-amber-800"></span>
-                  <span>Marked for Review</span>
+                  <span className="w-2.5 h-2.5 rounded bg-slate-950 border border-slate-800"></span>
+                  <span>Upcoming Challenge (Locked)</span>
                 </div>
+              </div>
+
+              <div className="p-3 bg-blue-950/40 border border-blue-900/60 rounded-xl text-[11px] font-mono text-blue-300 leading-relaxed">
+                ℹ️ <strong>Strict One-Way Rule:</strong> Questions appear exactly once. You cannot return to previous questions once timer expires or next is pressed.
               </div>
 
             </div>
@@ -572,6 +574,7 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
               </div>
               <div className="text-[11px] text-slate-400 space-y-1.5">
                 <p>• 10s per question limit</p>
+                <p>• One-way sequential flow (No Backtracking)</p>
                 <p>• Switching tabs triggers Strike 1 warning</p>
                 <p>• 2nd violation = Instant disqualification</p>
               </div>
@@ -599,13 +602,13 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
           setShowConfirmModal(false);
           onSubmitQuiz();
         }}
-        totalQuestions={totalQuestions}
         answeredCount={answeredCount}
-        unansweredCount={unansweredCount}
+        unansweredCount={totalQuestions - answeredCount}
+        totalQuestions={totalQuestions}
         isSubmitting={isSubmitting}
       />
 
-      {/* Anti-Cheat / AI Restriction Warning Modal (Strike 1) */}
+      {/* Anti-AI Strike Warning Modal */}
       <AiSecurityWarningModal
         isOpen={showAiWarningModal}
         violationReason={violationReason}

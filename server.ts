@@ -168,6 +168,7 @@ export interface QuizSession {
   startTime: number;
   durationSeconds: number;
   perQuestionSeconds: number;
+  currentIndex?: number;
   answers: Record<number, number>; // questionId -> optionIndex (0-3)
   markedForReview?: Record<number, boolean>;
   submitted: boolean;
@@ -463,6 +464,7 @@ async function startServer() {
       startTime: session.startTime,
       durationSeconds: session.durationSeconds,
       perQuestionSeconds: session.perQuestionSeconds || PER_QUESTION_SECONDS,
+      currentIndex: session.currentIndex ?? 0,
       elapsedSeconds,
       remainingSeconds,
       answers: session.answers,
@@ -487,7 +489,7 @@ async function startServer() {
 
   // 6. Save Draft Answers & Progress
   app.post('/api/quiz/save-answers', (req, res) => {
-    const { sessionId, answers, markedForReview } = req.body;
+    const { sessionId, answers, markedForReview, currentIndex } = req.body;
     const session = sessionsStore.get(sessionId);
 
     if (!session) {
@@ -505,6 +507,9 @@ async function startServer() {
     }
     if (markedForReview && typeof markedForReview === 'object') {
       session.markedForReview = { ...(session.markedForReview || {}), ...markedForReview };
+    }
+    if (typeof currentIndex === 'number' && currentIndex >= 0) {
+      session.currentIndex = Math.max(session.currentIndex || 0, currentIndex);
     }
 
     sessionsStore.set(sessionId, session);

@@ -290,10 +290,10 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 10 SEC / QUESTION
               </div>
               <h3 className="font-display text-lg font-bold text-white">
-                Strict Countdown Timer
+                Strict 10s One-Way Timer
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Each question features a rapid 10-second timer. Answers auto-advance on expiration.
+                Questions appear once in strict order. Answers auto-advance on expiration with no backtracking.
               </p>
             </motion.div>
 

@@ -22,6 +22,7 @@ export interface QuizSessionState {
   durationSeconds: number;
   remainingSeconds: number;
   perQuestionSeconds: number; // 10 seconds per question
+  currentIndex?: number;
   answers: Record<number, number>; // questionId -> selectedOptionIndex (0-3)
   markedForReview: Record<number, boolean>;
   submitted: boolean;

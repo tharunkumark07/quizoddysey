@@ -56,6 +56,7 @@ export default function App() {
       // Pre-load from local draft for instantaneous paint
       let localDraftAnswers: Record<number, number> = {};
       let localDraftMarked: Record<number, boolean> = {};
+      let localDraftIndex = 0;
       try {
         const rawDraft = localStorage.getItem(`TQ_DRAFT_${savedSessionId}`);
         if (rawDraft) {
@@ -65,6 +66,9 @@ export default function App() {
           }
           if (parsed.markedForReview && typeof parsed.markedForReview === 'object') {
             localDraftMarked = parsed.markedForReview;
+          }
+          if (typeof parsed.currentIndex === 'number') {
+            localDraftIndex = parsed.currentIndex;
           }
         }
       } catch {}
@@ -121,6 +125,7 @@ export default function App() {
               durationSeconds: data.durationSeconds,
               remainingSeconds: data.remainingSeconds,
               perQuestionSeconds: data.perQuestionSeconds || 10,
+              currentIndex: typeof data.currentIndex === 'number' ? data.currentIndex : localDraftIndex,
               answers: mergedAnswers,
               markedForReview: mergedMarked,
               submitted: false,
@@ -225,6 +230,7 @@ export default function App() {
         sessionId: sessionState.sessionId,
         answers: updatedAnswers,
         markedForReview: sessionState.markedForReview,
+        currentIndex: sessionState.currentIndex ?? 0,
         updatedAt: Date.now(),
       }));
     } catch {}
@@ -237,11 +243,40 @@ export default function App() {
         sessionId: sessionState.sessionId,
         answers: updatedAnswers,
         markedForReview: sessionState.markedForReview,
+        currentIndex: sessionState.currentIndex ?? 0,
       }),
     }).catch(() => {});
   };
 
-  // 6. Toggle Mark for Review (Instant Local + Server Sync)
+  // 6. Advance Question Handler (Forward-Only)
+  const handleAdvanceQuestion = (nextIndex: number) => {
+    if (!sessionState) return;
+
+    setSessionState((prev) => prev ? { ...prev, currentIndex: nextIndex } : null);
+
+    try {
+      localStorage.setItem(`TQ_DRAFT_${sessionState.sessionId}`, JSON.stringify({
+        sessionId: sessionState.sessionId,
+        answers: sessionState.answers,
+        markedForReview: sessionState.markedForReview,
+        currentIndex: nextIndex,
+        updatedAt: Date.now(),
+      }));
+    } catch {}
+
+    fetch('/api/quiz/save-answers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: sessionState.sessionId,
+        answers: sessionState.answers,
+        markedForReview: sessionState.markedForReview,
+        currentIndex: nextIndex,
+      }),
+    }).catch(() => {});
+  };
+
+  // 7. Toggle Mark for Review (Instant Local + Server Sync)
   const handleToggleMarkForReview = (questionId: number) => {
     if (!sessionState) return;
     const isMarked = !sessionState.markedForReview[questionId];
@@ -397,7 +432,7 @@ export default function App() {
             session={sessionState}
             questions={questions}
             onSelectOption={handleSelectOption}
-            onToggleMarkForReview={handleToggleMarkForReview}
+            onAdvanceQuestion={handleAdvanceQuestion}
             onSubmitQuiz={() => handleFinalSubmit()}
             onDisqualify={handleDisqualify}
             isSubmitting={isSubmitting}
