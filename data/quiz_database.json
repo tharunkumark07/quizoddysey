@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "updatedAt": 1790871724356,
+  "config": {
+    "durationSeconds": 150,
+    "perQuestionSeconds": 10,
+    "totalQuestions": 15
+  },
+  "teams": [],
+  "sessions": []
+}

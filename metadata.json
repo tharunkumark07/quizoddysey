@@ -1,0 +1,6 @@
+{
+  "name": "Quiz Odyssey - RMKEC IEEE Student Branch",
+  "description": "Online Preliminary Qualifier Quiz Platform for Quiz Odyssey organized by IEEE Student Branch (STB61871), R.M.K. Engineering College.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
