@@ -1,0 +1,2 @@
+{"event":"QUIZ_SUBMITTED","timestamp":1791039062948,"data":{"sessionId":"SESSION-1791039051683-8727","teamId":"QO-2026-02","teamName":"Test Team Live","score":15,"correctCount":15,"completionTimeSeconds":11}}
+{"event":"ORGANIZER_SEEDED_15_TEAMS","timestamp":1791039609556,"data":{"count":15}}

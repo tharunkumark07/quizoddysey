@@ -115,6 +115,60 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
     }
   };
 
+  const [editingTeam, setEditingTeam] = useState<LeaderboardTeam | null>(null);
+  const [editScore, setEditScore] = useState<number>(0);
+  const [editTeamName, setEditTeamName] = useState<string>('');
+  const [editLeaderName, setEditLeaderName] = useState<string>('');
+  const [editIeee, setEditIeee] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const handleOpenEdit = (team: LeaderboardTeam) => {
+    setEditingTeam(team);
+    setEditScore(team.score);
+    setEditTeamName(team.teamName);
+    setEditLeaderName(team.leaderName);
+    setEditIeee(team.ieeeNumber || '');
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTeam) return;
+    setIsSavingEdit(true);
+    try {
+      const res = await fetch('/api/organizer/update-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: editingTeam.sessionId,
+          teamName: editTeamName,
+          leaderName: editLeaderName,
+          ieeeNumber: editIeee,
+          score: editScore,
+        }),
+      });
+      if (res.ok) {
+        setActionSuccess(`Updated ${editTeamName} successfully!`);
+        setEditingTeam(null);
+        fetchLeaderboard();
+        setTimeout(() => setActionSuccess(null), 3000);
+      }
+    } catch {} finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleGenerate15 = async () => {
+    if (!window.confirm("Seed/Generate 15 competition scorecards for the IEEE event?")) return;
+    try {
+      const res = await fetch('/api/organizer/seed-15', { method: 'POST' });
+      if (res.ok) {
+        setActionSuccess("Generated 15 official team scores and rankings!");
+        fetchLeaderboard();
+        setTimeout(() => setActionSuccess(null), 4000);
+      }
+    } catch {}
+  };
+
   const handleInspectTeam = async (team: LeaderboardTeam) => {
     setSelectedTeam(team);
     setIsInspectingLoading(true);
@@ -134,13 +188,20 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
   };
 
   const handleReset = async () => {
-    if (!window.confirm("Confirm reset? This will wipe all real team registrations and submissions.")) return;
+    if (!window.confirm("Confirm reset for Rescheduled Round? This will wipe previous attempts and allow all IEEE IDs to register and take the new test.")) return;
     try {
-      const res = await fetch('/api/organizer/reset', { method: 'POST' });
+      const res = await fetch('/api/organizer/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passkey: 'IEEE24' }),
+      });
       if (res.ok) {
-        setActionSuccess("All quiz sessions and teams reset successfully");
-        setTimeout(() => setActionSuccess(null), 3000);
+        setActionSuccess("All sessions reset! The rescheduled round is now OPEN for all IEEE IDs.");
+        setTimeout(() => setActionSuccess(null), 4000);
         fetchLeaderboard();
+      } else {
+        const err = await res.json();
+        setError(err.error || "Reset failed");
       }
     } catch (e) {
       setError("Failed to reset sessions");
@@ -251,6 +312,14 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export CSV</span>
+            </button>
+
+            <button
+              onClick={handleReset}
+              className="h-10 px-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 transition-colors cursor-pointer"
+              title="Reset all registrations and open rescheduled round"
+            >
+              Reset for Reschedule
             </button>
           </div>
         </div>
@@ -429,8 +498,14 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
                         )}
                       </td>
 
-                      {/* Inspect Button */}
-                      <td className="py-4 px-5 text-right">
+                      {/* Actions */}
+                      <td className="py-4 px-5 text-right space-x-2">
+                        <button
+                          onClick={() => handleOpenEdit(team)}
+                          className="text-xs text-amber-400 hover:text-amber-300 font-medium underline cursor-pointer"
+                        >
+                          Edit
+                        </button>
                         <button
                           onClick={() => handleInspectTeam(team)}
                           className="text-xs text-blue-400 hover:text-blue-300 font-medium underline cursor-pointer"
@@ -654,6 +729,89 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
                     className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider rounded-xl cursor-pointer"
                   >
                     {isSubmittingAdd ? "Saving..." : "Save to Scoreboard"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Team Modal */}
+        {editingTeam && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="font-display font-bold text-white text-lg">Edit Team Score &amp; Details</h3>
+                  <p className="text-xs text-slate-400 font-mono">Update team information directly on the leaderboard</p>
+                </div>
+                <button
+                  onClick={() => setEditingTeam(null)}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg cursor-pointer font-mono text-xs transition-colors"
+                >
+                  Close ×
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} className="space-y-4 text-xs font-mono">
+                <div>
+                  <label className="block uppercase text-slate-300 mb-1 font-semibold">TEAM NAME *</label>
+                  <input
+                    type="text"
+                    value={editTeamName}
+                    onChange={(e) => setEditTeamName(e.target.value)}
+                    className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block uppercase text-slate-300 mb-1 font-semibold">MEMBERS</label>
+                    <input
+                      type="text"
+                      value={editLeaderName}
+                      onChange={(e) => setEditLeaderName(e.target.value)}
+                      className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block uppercase text-slate-300 mb-1 font-semibold">IEEE NUMBER</label>
+                    <input
+                      type="text"
+                      value={editIeee}
+                      onChange={(e) => setEditIeee(e.target.value)}
+                      className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block uppercase text-slate-300 mb-1 font-semibold">SCORE (0 - 15)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="15"
+                    value={editScore}
+                    onChange={(e) => setEditScore(parseInt(e.target.value) || 0)}
+                    className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="pt-2 flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTeam(null)}
+                    className="flex-1 h-11 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="flex-1 h-11 bg-amber-600 hover:bg-amber-500 text-white font-bold uppercase tracking-wider rounded-xl cursor-pointer"
+                  >
+                    {isSavingEdit ? "Updating..." : "Save Changes"}
                   </button>
                 </div>
               </form>

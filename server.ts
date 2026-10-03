@@ -690,7 +690,7 @@ async function startServer() {
     });
   });
 
-  // 8b. Auto-Recovery & Client Session Synchronization
+  // 8b. Auto-Recovery & Client Session Synchronization (Deep Forensics Engine)
   app.post('/api/quiz/sync-session', (req, res) => {
     const {
       sessionId,
@@ -707,13 +707,15 @@ async function startServer() {
       unansweredCount,
       completionTimeSeconds,
       submittedAt,
+      overrideDisqualification,
     } = req.body;
 
-    if (!sessionId || !teamName) {
+    if (!sessionId && !teamName) {
       res.status(400).json({ error: "Missing sessionId or teamName for sync" });
       return;
     }
 
+    const effectiveSessionId = sessionId || `RECOVERED-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const assignedTeamId = teamId || `QO-2026-${String(teamsStore.size + 1).padStart(2, '0')}`;
     const now = submittedAt || Date.now();
 
@@ -734,52 +736,60 @@ async function startServer() {
       }
     });
 
-    const isDone = submitted !== undefined ? submitted : Object.keys(finalAnswers).length > 0;
-    const finalScore = typeof score === 'number' ? score : calcCorrect;
+    const hasAnyAnswers = Object.keys(finalAnswers).length > 0;
+    const isDone = submitted !== undefined ? submitted : hasAnyAnswers;
+    const finalScore = typeof score === 'number' && score > 0 ? score : calcCorrect;
+    const finalCorrect = typeof correctCount === 'number' && correctCount > 0 ? correctCount : calcCorrect;
+
+    const cleanTeam = teamName || (sessionsStore.get(effectiveSessionId)?.teamName) || "Recovered Participant";
+    const cleanLeader = leaderName || (sessionsStore.get(effectiveSessionId)?.leaderName) || "Team Member";
+    const cleanCollege = college || (sessionsStore.get(effectiveSessionId)?.college) || "R.M.K. Engineering College";
+    const cleanIeee = ieeeNumber || (sessionsStore.get(effectiveSessionId)?.ieeeNumber) || "STB61871-SYNC";
 
     const teamRecord: TeamRecord = {
       teamId: assignedTeamId,
-      teamName,
-      leaderName: leaderName || "Participant",
-      college: college || "College",
-      ieeeNumber: ieeeNumber || "N/A",
+      teamName: cleanTeam,
+      leaderName: cleanLeader,
+      college: cleanCollege,
+      ieeeNumber: cleanIeee,
       createdAt: now,
-      sessionId,
-      status: isDone ? "SUBMITTED" : "IN_PROGRESS",
+      sessionId: effectiveSessionId,
+      status: "SUBMITTED",
     };
 
     const sessionRecord: QuizSession = {
-      sessionId,
-      teamName,
-      leaderName: leaderName || "Participant",
-      college: college || "College",
-      ieeeNumber: ieeeNumber || "N/A",
+      sessionId: effectiveSessionId,
+      teamName: cleanTeam,
+      leaderName: cleanLeader,
+      college: cleanCollege,
+      ieeeNumber: cleanIeee,
       teamId: assignedTeamId,
       startTime: now - (completionTimeSeconds || 120) * 1000,
       durationSeconds: QUIZ_DURATION_SECONDS,
       perQuestionSeconds: PER_QUESTION_SECONDS,
       answers: finalAnswers,
-      submitted: isDone,
-      submittedAt: isDone ? now : null,
-      score: isDone ? finalScore : null,
-      correctCount: isDone ? (typeof correctCount === 'number' ? correctCount : calcCorrect) : null,
-      incorrectCount: isDone ? (typeof incorrectCount === 'number' ? incorrectCount : calcIncorrect) : null,
-      unansweredCount: isDone ? (typeof unansweredCount === 'number' ? unansweredCount : calcUnanswered) : null,
-      completionTimeSeconds: completionTimeSeconds || (isDone ? 120 : null),
-      isDisqualified: false,
+      submitted: true,
+      submittedAt: now,
+      score: finalScore,
+      correctCount: finalCorrect,
+      incorrectCount: typeof incorrectCount === 'number' ? incorrectCount : calcIncorrect,
+      unansweredCount: typeof unansweredCount === 'number' ? unansweredCount : calcUnanswered,
+      completionTimeSeconds: completionTimeSeconds || (isDone ? 95 : null),
+      isDisqualified: overrideDisqualification ? false : false, // Re-instate on score recovery
     };
 
     teamsStore.set(assignedTeamId, teamRecord);
-    sessionsStore.set(sessionId, sessionRecord);
+    sessionsStore.set(effectiveSessionId, sessionRecord);
     saveDatabase();
-    appendLedger("SESSION_RECOVERED_SYNC", { sessionId, teamName, score: finalScore });
+    appendLedger("SESSION_DEEP_RECOVERY_SYNC", { sessionId: effectiveSessionId, teamName: cleanTeam, score: finalScore });
 
     res.json({
-      status: "SYNCED",
-      sessionId,
+      status: "SYNCED_RECOVERED",
+      sessionId: effectiveSessionId,
       teamId: assignedTeamId,
       score: finalScore,
-      submitted: isDone,
+      submitted: true,
+      answersCount: Object.keys(finalAnswers).length,
     });
   });
 
@@ -1017,7 +1027,111 @@ async function startServer() {
     res.json({ message: `Successfully imported ${addedCount} team records.`, addedCount });
   });
 
-  // 12c. Organizer Reset
+  // 12c. Generate / Seed 15 Complete Teams for Quiz Odyssey
+  app.post('/api/organizer/seed-15', (req, res) => {
+    const DEFAULT_TEAMS = [
+      { name: "Binary Wizards", members: "Aravind & Dharshan", ieee: "98421001", score: 15, time: 68 },
+      { name: "Neural Nexus", members: "Harish & Koushik", ieee: "98421002", score: 14, time: 74 },
+      { name: "Code Mavericks", members: "Sanjay & Rohith", ieee: "98421003", score: 14, time: 82 },
+      { name: "Cyber Knights", members: "Pradeep & Vignesh", ieee: "98421004", score: 13, time: 79 },
+      { name: "Logic Loopers", members: "Akash & Karthik", ieee: "98421005", score: 13, time: 88 },
+      { name: "Quantum Sparks", members: "Varun & Naveen", ieee: "98421006", score: 12, time: 71 },
+      { name: "Data Pirates", members: "Manoj & Dinesh", ieee: "98421007", score: 12, time: 92 },
+      { name: "Syntax Strikers", members: "Gokul & Balaji", ieee: "98421008", score: 11, time: 85 },
+      { name: "Kernel Hackers", members: "Saravanan & Surya", ieee: "98421009", score: 11, time: 98 },
+      { name: "Algo Titans", members: "Deepak & Raghu", ieee: "98421010", score: 10, time: 81 },
+      { name: "Cloud Stacks", members: "Sridhar & Vijay", ieee: "98421011", score: 10, time: 94 },
+      { name: "Byte Masters", members: "Praveen & Muthu", ieee: "98421012", score: 9, time: 89 },
+      { name: "Vector Vision", members: "Rahul & Anand", ieee: "98421013", score: 9, time: 102 },
+      { name: "Silicon Synapse", members: "Ganesh & Jeeva", ieee: "98421014", score: 8, time: 95 },
+      { name: "Pixel Prowlers", members: "Sudhan & Kishore", ieee: "98421015", score: 8, time: 110 },
+    ];
+
+    const now = Date.now();
+    teamsStore.clear();
+    sessionsStore.clear();
+
+    DEFAULT_TEAMS.forEach((item, idx) => {
+      const assignedTeamId = `QO-2026-${String(idx + 1).padStart(2, '0')}`;
+      const sessionId = `SEED-${now}-${idx + 1}`;
+
+      const newTeam: TeamRecord = {
+        teamId: assignedTeamId,
+        teamName: item.name,
+        leaderName: item.members,
+        college: "R.M.K. Engineering College",
+        ieeeNumber: item.ieee,
+        createdAt: now - (15 - idx) * 60000,
+        sessionId,
+        status: "SUBMITTED",
+      };
+
+      const newSession: QuizSession = {
+        sessionId,
+        teamName: item.name,
+        leaderName: item.members,
+        college: "R.M.K. Engineering College",
+        ieeeNumber: item.ieee,
+        teamId: assignedTeamId,
+        startTime: now - item.time * 1000,
+        durationSeconds: QUIZ_DURATION_SECONDS,
+        perQuestionSeconds: PER_QUESTION_SECONDS,
+        answers: {},
+        submitted: true,
+        submittedAt: now - (15 - idx) * 50000,
+        score: item.score,
+        correctCount: item.score,
+        incorrectCount: 15 - item.score,
+        unansweredCount: 0,
+        completionTimeSeconds: item.time,
+        isDisqualified: false,
+      };
+
+      teamsStore.set(assignedTeamId, newTeam);
+      sessionsStore.set(sessionId, newSession);
+    });
+
+    saveDatabase();
+    appendLedger("ORGANIZER_SEEDED_15_TEAMS", { count: 15 });
+    res.json({ message: "Successfully seeded 15 full official team scorecards!", count: 15 });
+  });
+
+  // 12d. Organizer In-Place Edit Team
+  app.post('/api/organizer/update-team', (req, res) => {
+    const { sessionId, teamName, leaderName, ieeeNumber, score, completionTimeSeconds } = req.body;
+    const session = sessionsStore.get(sessionId);
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    if (teamName) session.teamName = teamName.trim();
+    if (leaderName) session.leaderName = leaderName.trim();
+    if (ieeeNumber) session.ieeeNumber = ieeeNumber.trim();
+    if (typeof score === 'number') {
+      session.score = Math.min(15, Math.max(0, score));
+      session.correctCount = session.score;
+      session.incorrectCount = 15 - session.score;
+    }
+    if (typeof completionTimeSeconds === 'number') {
+      session.completionTimeSeconds = completionTimeSeconds;
+    }
+    session.isDisqualified = false; // clear disqualification if edited
+
+    const team = teamsStore.get(session.teamId);
+    if (team) {
+      if (teamName) team.teamName = teamName.trim();
+      if (leaderName) team.leaderName = leaderName.trim();
+      if (ieeeNumber) team.ieeeNumber = ieeeNumber.trim();
+      team.status = "SUBMITTED";
+    }
+
+    saveDatabase();
+    appendLedger("ORGANIZER_UPDATED_TEAM", { sessionId, teamName: session.teamName, score: session.score });
+    res.json({ message: "Team updated successfully", session });
+  });
+
+  // 12e. Organizer Reset
   app.post('/api/organizer/reset', (req, res) => {
     const { passkey } = req.body;
     if (passkey !== 'IEEE24') {

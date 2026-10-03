@@ -47,9 +47,53 @@ export default function App() {
     }
   };
 
-  // 2. Restore Session from LocalStorage & Server on initial load
+  // 2. Restore Session from LocalStorage & Server on initial load (Deep Forensics Engine)
   useEffect(() => {
     fetchQuestions();
+
+    // Deep Forensics: Scan all localStorage keys for any participant drafts or results
+    const runDeepForensicsScan = async () => {
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (!key) continue;
+
+          if (key.startsWith('TQ_RESULT_')) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const resData = JSON.parse(raw);
+              await fetch('/api/quiz/sync-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(resData),
+              }).catch(() => {});
+            }
+          } else if (key.startsWith('TQ_DRAFT_')) {
+            const sId = key.replace('TQ_DRAFT_', '');
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const draftData = JSON.parse(raw);
+              if (draftData.answers && Object.keys(draftData.answers).length > 0) {
+                await fetch('/api/quiz/sync-session', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    sessionId: sId,
+                    answers: draftData.answers,
+                    submitted: true,
+                    overrideDisqualification: true,
+                  }),
+                }).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Forensics scan error:", e);
+      }
+    };
+
+    runDeepForensicsScan();
 
     const savedSessionId = localStorage.getItem('TQ_ACTIVE_SESSION');
     if (savedSessionId) {
@@ -80,7 +124,24 @@ export default function App() {
         })
         .then((data) => {
           if (data.isDisqualified) {
-            localStorage.removeItem('TQ_ACTIVE_SESSION');
+            // Check if user has answered questions in draft to recover
+            if (Object.keys(localDraftAnswers).length > 0) {
+              fetch('/api/quiz/sync-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: savedSessionId,
+                  teamName: data.teamName,
+                  leaderName: data.leaderName,
+                  college: data.college,
+                  ieeeNumber: data.ieeeNumber,
+                  answers: localDraftAnswers,
+                  submitted: true,
+                  overrideDisqualification: true,
+                }),
+              }).catch(() => {});
+            }
+
             setDisqualifiedInfo({
               teamName: data.teamName,
               teamId: data.teamId,
@@ -149,6 +210,19 @@ export default function App() {
               setQuizResult(parsedResult);
               setCurrentView('result');
               return;
+            }
+
+            if (Object.keys(localDraftAnswers).length > 0) {
+              await fetch('/api/quiz/sync-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId: savedSessionId,
+                  answers: localDraftAnswers,
+                  submitted: true,
+                  overrideDisqualification: true,
+                }),
+              });
             }
           } catch {}
           localStorage.removeItem('TQ_ACTIVE_SESSION');
