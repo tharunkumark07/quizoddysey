@@ -170,6 +170,12 @@ export const ResultView: React.FC<ResultViewProps> = ({
             <span className="text-slate-400 uppercase">REGISTRATION ID</span>
             <span className="text-blue-400 font-semibold">{result.teamId}</span>
           </div>
+          {result.ieeeNumber && (
+            <div className="flex justify-between py-2 border-b border-slate-800/80">
+              <span className="text-slate-400 uppercase">IEEE MEMBER / REG NO</span>
+              <span className="text-white font-mono font-bold">{result.ieeeNumber}</span>
+            </div>
+          )}
           <div className="flex justify-between py-2">
             <span className="text-slate-400 uppercase">TIMESTAMP</span>
             <span className="text-slate-400">{formattedTimestamp}</span>

@@ -94,6 +94,7 @@ export default function App() {
               teamName: data.teamName,
               leaderName: data.leaderName,
               college: data.college,
+              ieeeNumber: data.ieeeNumber || data.result?.ieeeNumber,
               teamId: data.teamId,
               submittedAt: data.submittedAt || Date.now(),
               score: data.result?.score ?? data.score ?? 0,
@@ -120,6 +121,7 @@ export default function App() {
               teamName: data.teamName,
               leaderName: data.leaderName,
               college: data.college,
+              ieeeNumber: data.ieeeNumber || '',
               teamId: data.teamId,
               startTime: data.startTime,
               durationSeconds: data.durationSeconds,
@@ -133,7 +135,22 @@ export default function App() {
             setCurrentView('quiz');
           }
         })
-        .catch(() => {
+        .catch(async () => {
+          // Automatic recovery: check if user has local completed result or draft
+          try {
+            const rawResult = localStorage.getItem(`TQ_RESULT_${savedSessionId}`);
+            if (rawResult) {
+              const parsedResult = JSON.parse(rawResult);
+              await fetch('/api/quiz/sync-session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(parsedResult),
+              });
+              setQuizResult(parsedResult);
+              setCurrentView('result');
+              return;
+            }
+          } catch {}
           localStorage.removeItem('TQ_ACTIVE_SESSION');
         });
     }
@@ -162,6 +179,7 @@ export default function App() {
         teamName: data.teamName,
         leaderName: data.leaderName,
         college: data.college,
+        ieeeNumber: data.ieeeNumber || teamInfo.ieeeNumber,
         teamId: data.teamId,
         startTime: data.startTime,
         durationSeconds: data.durationSeconds,
@@ -377,6 +395,7 @@ export default function App() {
         teamName: data.teamName,
         leaderName: data.leaderName,
         college: data.college,
+        ieeeNumber: data.ieeeNumber || sessionState?.ieeeNumber,
         teamId: data.teamId,
         submittedAt: data.submittedAt || Date.now(),
         score: data.score,
@@ -385,6 +404,10 @@ export default function App() {
         unansweredCount: data.unansweredCount,
         completionTimeSeconds: data.completionTimeSeconds,
       };
+
+      try {
+        localStorage.setItem(`TQ_RESULT_${data.sessionId}`, JSON.stringify(resultObj));
+      } catch {}
 
       setQuizResult(resultObj);
       if (sessionState) {

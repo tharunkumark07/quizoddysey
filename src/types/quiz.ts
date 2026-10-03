@@ -9,6 +9,7 @@ export interface TeamRegistration {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber: string;
   teamId?: string;
 }
 
@@ -17,6 +18,7 @@ export interface QuizSessionState {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber: string;
   teamId: string;
   startTime: number;
   durationSeconds: number;
@@ -35,6 +37,7 @@ export interface QuizResult {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber?: string;
   teamId: string;
   submittedAt: number;
   score?: number;
@@ -51,6 +54,7 @@ export interface LeaderboardTeam {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber?: string;
   teamId: string;
   score: number;
   totalQuestions: number;

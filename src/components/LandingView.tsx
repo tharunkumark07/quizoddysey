@@ -23,6 +23,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
   const [leaderName, setLeaderName] = useState('');
   const [member2Name, setMember2Name] = useState('');
   const [college, setCollege] = useState('R.M.K. Engineering College');
+  const [ieeeNumber, setIeeeNumber] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -39,6 +40,10 @@ export const LandingView: React.FC<LandingViewProps> = ({
       setFormError("Please enter Member 2 name (Team size: 2 Members)");
       return;
     }
+    if (!ieeeNumber.trim()) {
+      setFormError("Please enter your IEEE Membership / Registration Number");
+      return;
+    }
     if (!college.trim()) {
       setFormError("Please enter your college / institution name");
       return;
@@ -49,6 +54,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
       teamName: teamName.trim(),
       leaderName: `${leaderName.trim()} & ${member2Name.trim()}`,
       college: college.trim(),
+      ieeeNumber: ieeeNumber.trim(),
     });
   };
 
@@ -472,7 +478,29 @@ export const LandingView: React.FC<LandingViewProps> = ({
                   </div>
                 </div>
 
-                {/* 3. College / Institution */}
+                {/* 3. IEEE Membership / Registration Number (One attempt limit) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-mono font-semibold uppercase tracking-wider text-slate-300">
+                      IEEE MEMBERSHIP / REGISTRATION NUMBER *
+                    </label>
+                    <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/80">
+                      1 ATTEMPT PER ID
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={ieeeNumber}
+                    onChange={(e) => setIeeeNumber(e.target.value)}
+                    placeholder="e.g. 98765432 / STB61871-042"
+                    className="w-full h-13 px-4 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 font-sans text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors font-mono"
+                  />
+                  <p className="text-[11px] font-mono text-slate-400">
+                    Enter the IEEE Member ID or Official Event Reg No. Repeating an already submitted ID is prohibited.
+                  </p>
+                </div>
+
+                {/* 4. College / Institution */}
                 <div className="space-y-2">
                   <label className="block text-xs font-mono font-semibold uppercase tracking-wider text-slate-300">
                     COLLEGE / INSTITUTION *
@@ -535,7 +563,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
                   <div className="border-t border-slate-800/80 pt-3">
                     <span className="text-slate-500 block text-[10px] font-mono uppercase">VENUE &amp; FINALS STAGE</span>
                     <p className="text-slate-300 text-xs mt-0.5">
-                      R.M.K. Engineering College Auditorium &amp; IT Computing Lab
+                      R.M.K. Engineering College Auditorium
                     </p>
                   </div>
                 </div>

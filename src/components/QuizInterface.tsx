@@ -585,7 +585,12 @@ export const QuizInterface: React.FC<QuizInterfaceProps> = ({
               <div className="text-[10px] text-slate-500 uppercase font-semibold">REGISTERED TEAM</div>
               <div className="font-display font-bold text-white text-base">{session.teamName}</div>
               <div className="text-slate-400 text-[11px]">{session.college}</div>
-              <div className="text-[10px] text-blue-400 pt-1">ID: {session.teamId}</div>
+              <div className="flex items-center justify-between text-[10px] pt-1">
+                <span className="text-blue-400">ID: {session.teamId}</span>
+                {session.ieeeNumber && (
+                  <span className="text-slate-400">IEEE: <strong className="text-white font-mono">{session.ieeeNumber}</strong></span>
+                )}
+              </div>
             </div>
 
           </div>

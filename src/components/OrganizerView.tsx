@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LeaderboardTeam } from '../types/quiz';
-import { Trophy, RefreshCw, Download, Search, Award, Clock, Users, CheckCircle, Key, Eye, AlertCircle } from 'lucide-react';
+import { Trophy, RefreshCw, Download, Search, Award, Clock, Users, CheckCircle, Key, Eye, AlertCircle, UserPlus, Plus } from 'lucide-react';
 
 interface OrganizerViewProps {
   onBackToQualifier: () => void;
@@ -37,7 +37,17 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
   const [teamInspection, setTeamInspection] = useState<TeamInspectionDetail[] | null>(null);
   const [isInspectingLoading, setIsInspectingLoading] = useState(false);
   const [showMasterKeyModal, setShowMasterKeyModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Manual Add Form State
+  const [addTeamName, setAddTeamName] = useState('');
+  const [addLeaderName, setAddLeaderName] = useState('');
+  const [addCollege, setAddCollege] = useState('R.M.K. Engineering College');
+  const [addIeee, setAddIeee] = useState('');
+  const [addScore, setAddScore] = useState('12');
+  const [addTime, setAddTime] = useState('95');
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
 
   const fetchLeaderboard = async () => {
     setIsLoading(true);
@@ -64,6 +74,46 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
     const interval = setInterval(fetchLeaderboard, 8000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleManualAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addTeamName.trim()) {
+      alert("Please enter Team Name");
+      return;
+    }
+    setIsSubmittingAdd(true);
+    try {
+      const res = await fetch('/api/organizer/add-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamName: addTeamName.trim(),
+          leaderName: addLeaderName.trim() || 'Team Representatives',
+          college: addCollege.trim() || 'R.M.K. Engineering College',
+          ieeeNumber: addIeee.trim() || 'STB61871-RESTORED',
+          score: parseInt(addScore) || 0,
+          completionTimeSeconds: parseInt(addTime) || 90,
+        }),
+      });
+
+      if (res.ok) {
+        setActionSuccess(`Team "${addTeamName}" successfully restored to Scoreboard!`);
+        setShowAddModal(false);
+        setAddTeamName('');
+        setAddLeaderName('');
+        setAddIeee('');
+        fetchLeaderboard();
+        setTimeout(() => setActionSuccess(null), 4000);
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to add team");
+      }
+    } catch (e: any) {
+      alert(e.message || "Error adding team");
+    } finally {
+      setIsSubmittingAdd(false);
+    }
+  };
 
   const handleInspectTeam = async (team: LeaderboardTeam) => {
     setSelectedTeam(team);
@@ -99,13 +149,14 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
 
   const handleExportCSV = () => {
     if (leaderboard.length === 0) return;
-    const headers = ["Rank", "Team Name", "Leader Name", "College", "Team ID", "Score", "Accuracy (%)", "Time Taken (s)", "Timestamp", "Status"];
+    const headers = ["Rank", "Team Name", "Leader Name", "College", "Team ID", "IEEE Number", "Score", "Accuracy (%)", "Time Taken (s)", "Timestamp", "Status"];
     const rows = leaderboard.map((t) => [
       t.rank,
       `"${t.teamName.replace(/"/g, '""')}"`,
       `"${t.leaderName.replace(/"/g, '""')}"`,
       `"${t.college.replace(/"/g, '""')}"`,
       t.teamId,
+      `"${(t.ieeeNumber || 'N/A').replace(/"/g, '""')}"`,
       `${t.score}/${t.totalQuestions}`,
       Math.round((t.score / t.totalQuestions) * 100),
       t.completionTimeSeconds,
@@ -130,11 +181,13 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
   };
 
   const filteredTeams = leaderboard.filter((team) => {
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
-      team.teamName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      team.college.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      team.leaderName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      team.teamId.toLowerCase().includes(searchQuery.toLowerCase());
+      team.teamName.toLowerCase().includes(q) ||
+      team.college.toLowerCase().includes(q) ||
+      team.leaderName.toLowerCase().includes(q) ||
+      team.teamId.toLowerCase().includes(q) ||
+      (team.ieeeNumber && team.ieeeNumber.toLowerCase().includes(q));
 
     if (filterQualifyingOnly) {
       return matchesSearch && team.isQualified;
@@ -168,6 +221,14 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
 
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
             <button
+              onClick={() => setShowAddModal(true)}
+              className="h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-all flex items-center space-x-1.5 cursor-pointer shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add / Restore Team</span>
+            </button>
+
+            <button
               onClick={() => setShowMasterKeyModal(true)}
               className="h-10 px-4 rounded-xl bg-blue-950 text-blue-300 border border-blue-800 font-medium transition-all hover:bg-blue-900 flex items-center space-x-1.5 cursor-pointer shadow-sm"
             >
@@ -190,14 +251,6 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export CSV</span>
-            </button>
-
-            <button
-              onClick={handleReset}
-              className="h-10 px-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 transition-colors cursor-pointer"
-              title="Reset all registrations and submissions"
-            >
-              Reset All
             </button>
           </div>
         </div>
@@ -335,6 +388,12 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
                         <div className="font-semibold text-white">{team.teamName}</div>
                         <div className="text-xs text-slate-400 font-mono mt-0.5">
                           {team.leaderName} <span className="text-slate-600">·</span> <span className="text-blue-400">{team.teamId}</span>
+                          {team.ieeeNumber && (
+                            <>
+                              <span className="text-slate-600"> · </span>
+                              <span className="text-slate-300">IEEE: <strong className="text-white font-mono">{team.ieeeNumber}</strong></span>
+                            </>
+                          )}
                         </div>
                       </td>
 
@@ -488,6 +547,116 @@ export const OrganizerView: React.FC<OrganizerViewProps> = ({ onBackToQualifier 
                   );
                 })}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add / Restore Team Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="font-display font-bold text-white text-lg">Add / Restore Team Entry</h3>
+                  <p className="text-xs text-slate-400 font-mono">Directly insert or restore any participant submission</p>
+                </div>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg cursor-pointer font-mono text-xs transition-colors"
+                >
+                  Close ×
+                </button>
+              </div>
+
+              <form onSubmit={handleManualAddSubmit} className="space-y-4 text-xs font-mono">
+                <div>
+                  <label className="block uppercase text-slate-300 mb-1 font-semibold">TEAM NAME *</label>
+                  <input
+                    type="text"
+                    value={addTeamName}
+                    onChange={(e) => setAddTeamName(e.target.value)}
+                    placeholder="e.g. Code Knights"
+                    className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block uppercase text-slate-300 mb-1 font-semibold">MEMBERS</label>
+                    <input
+                      type="text"
+                      value={addLeaderName}
+                      onChange={(e) => setAddLeaderName(e.target.value)}
+                      placeholder="e.g. Arun & Balaji"
+                      className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block uppercase text-slate-300 mb-1 font-semibold">IEEE NUMBER</label>
+                    <input
+                      type="text"
+                      value={addIeee}
+                      onChange={(e) => setAddIeee(e.target.value)}
+                      placeholder="e.g. 98765432"
+                      className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block uppercase text-slate-300 mb-1 font-semibold">COLLEGE / INSTITUTION</label>
+                  <input
+                    type="text"
+                    value={addCollege}
+                    onChange={(e) => setAddCollege(e.target.value)}
+                    placeholder="e.g. R.M.K. Engineering College"
+                    className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-sans text-xs focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block uppercase text-slate-300 mb-1 font-semibold">SCORE (0 - 15)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="15"
+                      value={addScore}
+                      onChange={(e) => setAddScore(e.target.value)}
+                      className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block uppercase text-slate-300 mb-1 font-semibold">TIME TAKEN (SECS)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="300"
+                      value={addTime}
+                      onChange={(e) => setAddTime(e.target.value)}
+                      className="w-full h-10 px-3.5 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="flex-1 h-11 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingAdd}
+                    className="flex-1 h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider rounded-xl cursor-pointer"
+                  >
+                    {isSubmittingAdd ? "Saving..." : "Save to Scoreboard"}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

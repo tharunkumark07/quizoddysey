@@ -154,6 +154,7 @@ export interface TeamRecord {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber: string;
   createdAt: number;
   sessionId: string;
   status: "IN_PROGRESS" | "SUBMITTED" | "DISQUALIFIED";
@@ -164,6 +165,7 @@ export interface QuizSession {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber: string;
   teamId: string;
   startTime: number;
   durationSeconds: number;
@@ -189,6 +191,7 @@ export interface LeaderboardEntry {
   teamName: string;
   leaderName: string;
   college: string;
+  ieeeNumber: string;
   teamId: string;
   score: number;
   totalQuestions: number;
@@ -206,6 +209,7 @@ export interface LeaderboardEntry {
 // --- PERSISTENT FILE DATABASE SYSTEM ---
 const DATA_DIR = path.resolve(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'quiz_database.json');
+const LEDGER_FILE = path.join(DATA_DIR, 'quiz_audit_ledger.jsonl');
 
 const PER_QUESTION_SECONDS = 10; // Strict 10 seconds per question
 let QUIZ_DURATION_SECONDS = QUESTIONS_DB.length * PER_QUESTION_SECONDS; // 15 questions * 10s = 150s
@@ -213,6 +217,18 @@ let QUIZ_DURATION_SECONDS = QUESTIONS_DB.length * PER_QUESTION_SECONDS; // 15 qu
 // Storage in memory, synced to disk
 const teamsStore = new Map<string, TeamRecord>();
 const sessionsStore = new Map<string, QuizSession>();
+
+function appendLedger(event: string, payload: any) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const line = JSON.stringify({ event, timestamp: Date.now(), data: payload }) + "\n";
+    fs.appendFileSync(LEDGER_FILE, line, 'utf-8');
+  } catch (e) {
+    console.error("[LEDGER] Failed to write ledger entry:", e);
+  }
+}
 
 function initDatabase() {
   try {
@@ -324,23 +340,42 @@ async function startServer() {
 
   // 4. Real Team Registration & Start Quiz Session
   app.post('/api/quiz/start', (req, res) => {
-    const { teamName, leaderName, college } = req.body;
+    const { teamName, leaderName, college, ieeeNumber } = req.body;
 
-    if (!teamName || !leaderName || !college) {
-      res.status(400).json({ error: "Missing required team details. Please provide Team Name, Team Representatives, and College." });
+    if (!teamName || !leaderName || !college || !ieeeNumber) {
+      res.status(400).json({
+        error: "Missing required details. Please provide Team Name, Team Representatives, College, and IEEE Membership / Registration Number.",
+      });
       return;
     }
 
     const cleanTeamName = teamName.trim();
     const cleanLeader = leaderName.trim();
     const cleanCollege = college.trim();
+    const cleanIeeeNumber = String(ieeeNumber).trim();
 
     if (cleanTeamName.length < 2 || cleanTeamName.length > 60) {
       res.status(400).json({ error: "Team name must be between 2 and 60 characters." });
       return;
     }
 
-    // Check for duplicate team name (case-insensitive)
+    if (cleanIeeeNumber.length < 2 || cleanIeeeNumber.length > 50) {
+      res.status(400).json({ error: "Please enter a valid IEEE Membership / Registration Number (2-50 characters)." });
+      return;
+    }
+
+    // 1. Strict Duplicate Check: Prevent multiple submissions / attempts for the same IEEE Number
+    const existingIeeeTeam = Array.from(teamsStore.values()).find(
+      (t) => t.ieeeNumber && t.ieeeNumber.toLowerCase() === cleanIeeeNumber.toLowerCase()
+    );
+    if (existingIeeeTeam) {
+      res.status(409).json({
+        error: `IEEE Registration Number "${cleanIeeeNumber}" has already been used to attend the quiz by team "${existingIeeeTeam.teamName}". Each IEEE registration is strictly allowed only ONE attempt/submission.`,
+      });
+      return;
+    }
+
+    // 2. Check for duplicate team name (case-insensitive)
     const existingTeam = Array.from(teamsStore.values()).find(
       (t) => t.teamName.toLowerCase() === cleanTeamName.toLowerCase()
     );
@@ -367,6 +402,7 @@ async function startServer() {
       teamName: cleanTeamName,
       leaderName: cleanLeader,
       college: cleanCollege,
+      ieeeNumber: cleanIeeeNumber,
       createdAt: now,
       sessionId,
       status: "IN_PROGRESS",
@@ -377,6 +413,7 @@ async function startServer() {
       teamName: cleanTeamName,
       leaderName: cleanLeader,
       college: cleanCollege,
+      ieeeNumber: cleanIeeeNumber,
       teamId: assignedTeamId,
       startTime: now,
       durationSeconds: QUIZ_DURATION_SECONDS,
@@ -402,6 +439,7 @@ async function startServer() {
       teamName: cleanTeamName,
       leaderName: cleanLeader,
       college: cleanCollege,
+      ieeeNumber: cleanIeeeNumber,
       teamId: assignedTeamId,
       startTime: newSession.startTime,
       durationSeconds: newSession.durationSeconds,
@@ -460,6 +498,7 @@ async function startServer() {
       teamName: session.teamName,
       leaderName: session.leaderName,
       college: session.college,
+      ieeeNumber: session.ieeeNumber || "N/A",
       teamId: session.teamId,
       startTime: session.startTime,
       durationSeconds: session.durationSeconds,
@@ -625,12 +664,21 @@ async function startServer() {
     }
 
     saveDatabase();
+    appendLedger("QUIZ_SUBMITTED", {
+      sessionId: session.sessionId,
+      teamId: session.teamId,
+      teamName: session.teamName,
+      score: session.score,
+      correctCount,
+      completionTimeSeconds,
+    });
 
     res.json({
       sessionId: session.sessionId,
       teamName: session.teamName,
       leaderName: session.leaderName,
       college: session.college,
+      ieeeNumber: session.ieeeNumber || "N/A",
       teamId: session.teamId,
       score: session.score,
       correctCount: session.correctCount,
@@ -639,6 +687,99 @@ async function startServer() {
       completionTimeSeconds: session.completionTimeSeconds,
       submittedAt,
       status: "RECORDED",
+    });
+  });
+
+  // 8b. Auto-Recovery & Client Session Synchronization
+  app.post('/api/quiz/sync-session', (req, res) => {
+    const {
+      sessionId,
+      teamName,
+      leaderName,
+      college,
+      ieeeNumber,
+      teamId,
+      answers,
+      submitted,
+      score,
+      correctCount,
+      incorrectCount,
+      unansweredCount,
+      completionTimeSeconds,
+      submittedAt,
+    } = req.body;
+
+    if (!sessionId || !teamName) {
+      res.status(400).json({ error: "Missing sessionId or teamName for sync" });
+      return;
+    }
+
+    const assignedTeamId = teamId || `QO-2026-${String(teamsStore.size + 1).padStart(2, '0')}`;
+    const now = submittedAt || Date.now();
+
+    // Calculate score accurately based on answer sheet
+    let calcCorrect = 0;
+    let calcIncorrect = 0;
+    let calcUnanswered = 0;
+    const finalAnswers: Record<number, number> = answers || {};
+
+    QUESTIONS_DB.forEach((q) => {
+      const userChoice = finalAnswers[q.id];
+      if (userChoice === undefined || userChoice === null) {
+        calcUnanswered++;
+      } else if (userChoice === q.correctIndex) {
+        calcCorrect++;
+      } else {
+        calcIncorrect++;
+      }
+    });
+
+    const isDone = submitted !== undefined ? submitted : Object.keys(finalAnswers).length > 0;
+    const finalScore = typeof score === 'number' ? score : calcCorrect;
+
+    const teamRecord: TeamRecord = {
+      teamId: assignedTeamId,
+      teamName,
+      leaderName: leaderName || "Participant",
+      college: college || "College",
+      ieeeNumber: ieeeNumber || "N/A",
+      createdAt: now,
+      sessionId,
+      status: isDone ? "SUBMITTED" : "IN_PROGRESS",
+    };
+
+    const sessionRecord: QuizSession = {
+      sessionId,
+      teamName,
+      leaderName: leaderName || "Participant",
+      college: college || "College",
+      ieeeNumber: ieeeNumber || "N/A",
+      teamId: assignedTeamId,
+      startTime: now - (completionTimeSeconds || 120) * 1000,
+      durationSeconds: QUIZ_DURATION_SECONDS,
+      perQuestionSeconds: PER_QUESTION_SECONDS,
+      answers: finalAnswers,
+      submitted: isDone,
+      submittedAt: isDone ? now : null,
+      score: isDone ? finalScore : null,
+      correctCount: isDone ? (typeof correctCount === 'number' ? correctCount : calcCorrect) : null,
+      incorrectCount: isDone ? (typeof incorrectCount === 'number' ? incorrectCount : calcIncorrect) : null,
+      unansweredCount: isDone ? (typeof unansweredCount === 'number' ? unansweredCount : calcUnanswered) : null,
+      completionTimeSeconds: completionTimeSeconds || (isDone ? 120 : null),
+      isDisqualified: false,
+    };
+
+    teamsStore.set(assignedTeamId, teamRecord);
+    sessionsStore.set(sessionId, sessionRecord);
+    saveDatabase();
+    appendLedger("SESSION_RECOVERED_SYNC", { sessionId, teamName, score: finalScore });
+
+    res.json({
+      status: "SYNCED",
+      sessionId,
+      teamId: assignedTeamId,
+      score: finalScore,
+      submitted: isDone,
     });
   });
 
@@ -673,6 +814,7 @@ async function startServer() {
         teamName: session.teamName,
         leaderName: session.leaderName,
         college: session.college,
+        ieeeNumber: session.ieeeNumber || "N/A",
         teamId: session.teamId,
         score: session.score!,
         totalQuestions: QUESTIONS_DB.length,
@@ -739,11 +881,153 @@ async function startServer() {
     });
   });
 
-  // 12. Organizer Reset
+  // 12. Organizer Add/Restore Entry
+  app.post('/api/organizer/add-entry', (req, res) => {
+    const { teamName, leaderName, college, ieeeNumber, score, completionTimeSeconds } = req.body;
+    if (!teamName) {
+      res.status(400).json({ error: "Team Name is required." });
+      return;
+    }
+
+    const cleanTeam = teamName.trim();
+    const cleanLeader = (leaderName || "Participant Team").trim();
+    const cleanCollege = (college || "R.M.K. Engineering College").trim();
+    const cleanIeee = (ieeeNumber || "STB61871-AUTO").trim();
+    const parsedScore = Math.min(15, Math.max(0, parseInt(score) || 0));
+    const parsedTime = Math.max(1, parseInt(completionTimeSeconds) || 90);
+
+    const now = Date.now();
+    let teamIndex = teamsStore.size + 1;
+    let assignedTeamId = `QO-2026-${String(teamIndex).padStart(2, '0')}`;
+    while (teamsStore.has(assignedTeamId)) {
+      teamIndex++;
+      assignedTeamId = `QO-2026-${String(teamIndex).padStart(2, '0')}`;
+    }
+
+    const sessionId = `MANUAL-SESSION-${now}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const newTeam: TeamRecord = {
+      teamId: assignedTeamId,
+      teamName: cleanTeam,
+      leaderName: cleanLeader,
+      college: cleanCollege,
+      ieeeNumber: cleanIeee,
+      createdAt: now,
+      sessionId,
+      status: "SUBMITTED",
+    };
+
+    const newSession: QuizSession = {
+      sessionId,
+      teamName: cleanTeam,
+      leaderName: cleanLeader,
+      college: cleanCollege,
+      ieeeNumber: cleanIeee,
+      teamId: assignedTeamId,
+      startTime: now - parsedTime * 1000,
+      durationSeconds: QUIZ_DURATION_SECONDS,
+      perQuestionSeconds: PER_QUESTION_SECONDS,
+      answers: {},
+      submitted: true,
+      submittedAt: now,
+      score: parsedScore,
+      correctCount: parsedScore,
+      incorrectCount: 15 - parsedScore,
+      unansweredCount: 0,
+      completionTimeSeconds: parsedTime,
+      isDisqualified: false,
+    };
+
+    teamsStore.set(assignedTeamId, newTeam);
+    sessionsStore.set(sessionId, newSession);
+    saveDatabase();
+    appendLedger("ORGANIZER_MANUAL_ENTRY", { teamId: assignedTeamId, teamName: cleanTeam, score: parsedScore });
+
+    res.status(201).json({ message: "Team record added successfully", teamId: assignedTeamId });
+  });
+
+  // 12b. Organizer Bulk Import
+  app.post('/api/organizer/bulk-import', (req, res) => {
+    const { items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: "Invalid items array." });
+      return;
+    }
+
+    let addedCount = 0;
+    const now = Date.now();
+
+    items.forEach((item: any, idx: number) => {
+      if (!item.teamName) return;
+      const cleanTeam = String(item.teamName).trim();
+      const cleanLeader = String(item.leaderName || "Team Representative").trim();
+      const cleanCollege = String(item.college || "R.M.K. Engineering College").trim();
+      const cleanIeee = String(item.ieeeNumber || `STB61871-${idx + 1}`).trim();
+      const parsedScore = Math.min(15, Math.max(0, parseInt(item.score) || 0));
+      const parsedTime = Math.max(1, parseInt(item.completionTimeSeconds) || (70 + idx * 3));
+
+      let teamIndex = teamsStore.size + 1;
+      let assignedTeamId = `QO-2026-${String(teamIndex).padStart(2, '0')}`;
+      while (teamsStore.has(assignedTeamId)) {
+        teamIndex++;
+        assignedTeamId = `QO-2026-${String(teamIndex).padStart(2, '0')}`;
+      }
+
+      const sessionId = `BULK-${now}-${idx}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newTeam: TeamRecord = {
+        teamId: assignedTeamId,
+        teamName: cleanTeam,
+        leaderName: cleanLeader,
+        college: cleanCollege,
+        ieeeNumber: cleanIeee,
+        createdAt: now,
+        sessionId,
+        status: "SUBMITTED",
+      };
+
+      const newSession: QuizSession = {
+        sessionId,
+        teamName: cleanTeam,
+        leaderName: cleanLeader,
+        college: cleanCollege,
+        ieeeNumber: cleanIeee,
+        teamId: assignedTeamId,
+        startTime: now - parsedTime * 1000,
+        durationSeconds: QUIZ_DURATION_SECONDS,
+        perQuestionSeconds: PER_QUESTION_SECONDS,
+        answers: {},
+        submitted: true,
+        submittedAt: now,
+        score: parsedScore,
+        correctCount: parsedScore,
+        incorrectCount: 15 - parsedScore,
+        unansweredCount: 0,
+        completionTimeSeconds: parsedTime,
+        isDisqualified: false,
+      };
+
+      teamsStore.set(assignedTeamId, newTeam);
+      sessionsStore.set(sessionId, newSession);
+      addedCount++;
+    });
+
+    saveDatabase();
+    appendLedger("ORGANIZER_BULK_IMPORT", { addedCount });
+    res.json({ message: `Successfully imported ${addedCount} team records.`, addedCount });
+  });
+
+  // 12c. Organizer Reset
   app.post('/api/organizer/reset', (req, res) => {
+    const { passkey } = req.body;
+    if (passkey !== 'IEEE24') {
+      res.status(403).json({ error: "Invalid organizer passkey. Reset rejected." });
+      return;
+    }
     teamsStore.clear();
     sessionsStore.clear();
     saveDatabase();
+    appendLedger("ORGANIZER_RESET", { timestamp: Date.now() });
     res.json({ message: "All quiz sessions and teams reset successfully" });
   });
 
